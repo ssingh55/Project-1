@@ -1,0 +1,133 @@
+#!/usr/bin/env python
+
+import cgi,cgitb
+import os,commands,time
+
+cgitb.enable()
+
+print "content-type:text/html"
+print ""
+
+v=cgi.FieldStorage()
+n=v.getvalue("d")
+nodes=int(n)
+#nodes=int(nodes)-2
+contId=[]
+
+os.system("sudo mkdir namenode")
+os.system("sudo mkdir datanode")
+os.system("sudo mkdir jobtracker")
+
+#First launch an container of docker and tag the name as "hadoop"
+
+print "creating docker containers for namenode"
+y=commands.getoutput('sudo docker run -itd -h nn.example.com -v /var/www/cgi-bin/namenode:/media hadoop')
+contId.append(y)
+
+
+print "creating docker containers for jobtracker"
+y=commands.getoutput('sudo docker run -itd -h jobt.example.com -v /var/wwww/cgi-bin/jobtracker:/media hadoop')
+contId.append(y)
+
+print "creating docker container for datanodes"
+count=1
+for i in range(nodes-2):
+	y=commands.getoutput("sudo docker run -itd -h dn"+str(count)+".example.com -v /var/www/cgi-bin/datanode:/media hadoop")
+	contId.append(y)
+	count+=1
+
+
+print "creating files"
+
+commands.getoutput("sudo touch namenode/hdfs-site.xml")
+commands.getoutput("sudo touch namenode/core-site.xml")
+commands.getoutput("sudo touch datanode/mapred-site.xml")
+commands.getoutput("sudo touch datanode/hdfs-site.xml")
+commands.getoutput("sudo touch datanode/core-site.xml")
+commands.getoutput("sudo touch jobtracker/mapred-site.xml")
+commands.getoutput("sudo touch jobtracker/core-site.xml")
+
+commands.getoutput('sudo chmod 766 namenode/hdfs-site.xml')
+commands.getoutput('sudo chmod 766 namenode/core-site.xml')
+commands.getoutput('sudo chmod 766 datanode/mapred-site.xml')
+commands.getoutput('sudo chmod 766 datanode/hdfs-site.xml')
+commands.getoutput('sudo chmod 766 datanode/core-site.xml')
+commands.getoutput('sudo chmod 766 jobtracker/mapred-site.xml')
+commands.getoutput('sudo chmod 766 jobtracker/core-site.xml')
+#commands.getoutput('sudo chmod 766 datanode/mapred-site.xml')
+
+
+print "Entrying in the core-site.xml"
+
+f=open("namenode/core-site.xml","w")
+f.write('<?xml version="1.0"?>\n<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>\n\n')
+f.write("<configuration>\n")
+f.write("<property>\n<name>fs.default.name</name>\n<value>hdfs://172.17.0.2:10005</value>\n</property>\n</configuration>\n")
+f.close()
+
+stat=commands.getstatusoutput("sudo cp namenode/core-site.xml datanode/core-site.xml ")
+stat=commands.getstatusoutput("sudo cp namenode/core-site.xml jobtracker/core-site.xml ")
+
+
+print "creating hdfs-site.xml for datanode"
+
+f=open('datanode/hdfs-site.xml','w')
+f.write('<?xml version="1.0"?>\n<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>\n')
+f.write('<configuration>\n<property>\n<name>dfs.data.dir</name>\n<value>/datanode_dir</value>\n</property>\n</configuration>\n')
+f.close()
+
+
+print "creating hdfs-site.xml for namenode"
+
+f=open('namenode/hdfs-site.xml','w')
+f.write('<?xml version="1.0"?>\n<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>\n')
+f.write('<configuration>\n<property>\n<name>dfs.name.dir</name>\n<value>/namenode_metadata</value>\n</property>\n</configuration>\n')
+f.close()
+
+
+print "creating mapred-site.xml  for tasktracker"
+
+f=open('datanode/mapred-site.xml','w')
+f.write('<?xml version="1.0"?>\n<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>\n')
+f.write('<configuration>\n<property>\n<name>mapred.job.tracker</name>\n<value>172.17.0.3:9001</value>\n</property>\n</configuration>\n')
+f.close()
+
+#commands.getoutput("sudo cp datanode/mapred-site.xml jobtracker/mapred-site.xml")
+
+print "creating mapred-site.xml for jobtracker "
+
+f=open('jobtracker/mapred-site.xml','w')
+f.write('<?xml version="1.0"?>\n<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>\n')
+f.write('<configuration>\n<property>\n<name>mapred.job.tracker</name>\n<value>172.17.0.3:9001</value>\n</property>\n</configuration>\n')
+f.close()
+
+f=open("copydock.py","w")
+f.write("#!/usr/bin/env python")
+f.write("\n\n")
+f.write("from os import system")
+f.write("\n\n")
+f.write("system(\"cp /media/* /etc/hadoop/\")")
+f.close()
+
+commands.getoutput("sudo chmod +x copydock.py")
+
+
+stat=commands.getstatusoutput(" sudo cp copydock.py namenode/  ")
+stat=commands.getstatusoutput(" sudo cp copydock.py datanode/ ")
+stat=commands.getstatusoutput(" sudo cp copydock.py jobtracker/  ")
+
+print "copying file into /etc/hadoop "
+for i in contId:
+	commands.getoutput("docker exec "+i+ " /media/copydock.py")
+
+
+print "starting the services of hadoop"
+commands.getoutput("docker exec "+contId[0]+" hadoop-daemon.sh start namenode")
+commands.getoutput("docker exec "+contId[1]+" hadoop-daemon.sh start jobtracker")
+for i in  range(nodes)[2:]:
+	commands.getoutput("docker exec "+contId[i]+" hadoop-daemon.sh start  datanode")
+	commands.getoutput("docker exec "+contId[i]+" hadoop-daemon.sh start tasktracker")
+	
+for i in contId:
+	
+	print commands.getoutput("docker exec "+i+" /usr/java/jdk1.7.0_79/bin/jps")
